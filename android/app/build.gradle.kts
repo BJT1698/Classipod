@@ -26,7 +26,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.adeeteya.classipod"
+        applicationId = "com.bjt1698.classipod.spotify"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -63,12 +63,12 @@ android {
     productFlavors {
         create("production") {
             dimension = "default"
-            resValue("string", "app_name", "Classipod")
+            resValue("string", "app_name", "Classipod Spotify")
             applicationIdSuffix = ""
         }
         create("dev") {
             dimension = "default"
-            resValue("string", "app_name", "Classipod Dev")
+            resValue("string", "app_name", "Classipod Spotify Dev")
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
         }
