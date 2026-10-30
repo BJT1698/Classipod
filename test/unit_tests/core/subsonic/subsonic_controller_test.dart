@@ -1,4 +1,5 @@
 // ignore_for_file: depend_on_referenced_packages
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,7 +12,6 @@ import 'package:classipod/core/subsonic/subsonic_client.dart';
 import 'package:classipod/core/subsonic/subsonic_controller.dart';
 import 'package:classipod/core/subsonic/subsonic_credentials.dart';
 import 'package:classipod/core/subsonic/subsonic_repository.dart';
-import 'package:classipod/features/settings/controller/hide_local_music_controller.dart';
 import 'package:classipod/features/settings/controller/prevent_duplicate_tracks_controller.dart';
 import 'package:classipod/features/settings/models/exclude_directory_model.dart';
 import 'package:classipod/hive/hive_registrar.g.dart';
@@ -38,19 +38,14 @@ class MemoryCredentials implements SubsonicCredentialStore {
   }
 }
 
-class ProgressOnlyController extends SubsonicController {
-  @override
-  Future<SubsonicState> build() async => const SubsonicState();
+class _FixedAudioFiles extends AudioFilesServiceNotifier {
+  final List<MusicMetadata> songs;
 
-  void reportProgress() {
-    state = AsyncData(
-      SubsonicState(
-        songs: state.requireValue.songs,
-        scanning: true,
-        indexedSongs: 375,
-      ),
-    );
-  }
+  _FixedAudioFiles(this.songs);
+
+  @override
+  Future<UnmodifiableListView<MusicMetadata>> build() async =>
+      UnmodifiableListView(songs);
 }
 
 void main() {
@@ -59,11 +54,9 @@ void main() {
   late ProviderContainer container;
   late MemoryCredentials credentials;
   var failPing = false;
-  var failLocal = false;
   var requests = 0;
   setUp(() async {
     requests = 0;
-    failLocal = false;
     failPing = false;
     directory = await Directory.systemTemp.createTemp('subsonic-controller-');
     Hive.init(directory.path);
@@ -73,10 +66,6 @@ void main() {
     credentials = MemoryCredentials();
     container = ProviderContainer(
       overrides: [
-        localLibraryProvider.overrideWith((_) async {
-          if (failLocal) throw StateError('No local permission');
-          return [MusicMetadata(songId: 'local', filePath: '/music/song.mp3')];
-        }),
         subsonicCredentialsProvider.overrideWithValue(credentials),
         subsonicClientFactoryProvider.overrideWithValue(
           (config, password) => SubsonicClient(
@@ -108,61 +97,6 @@ void main() {
   });
 
   test(
-    'hide local music persists and only applies while Subsonic is on',
-    () async {
-      const config = SubsonicConfig('https://one.test', 'user', enabled: true);
-      final repository = await container.read(
-        subsonicRepositoryProvider.future,
-      );
-      final remote = MusicMetadata(serverId: config.id, remoteSongId: 'remote');
-      await repository.box.put('catalog:${config.id}', [remote]);
-      final prefs = await container.read(
-        sharedPreferencesWithCacheProvider.future,
-      );
-      await prefs.setString(
-        'subsonicConfig',
-        jsonEncode({
-          'url': config.url,
-          'username': config.username,
-          'enabled': true,
-        }),
-      );
-      container.invalidate(subsonicControllerProvider);
-      await container.read(subsonicControllerProvider.future);
-      final subscription = container.listen(
-        audioFilesServiceProvider,
-        (_, _) {},
-      );
-      addTearDown(subscription.close);
-      expect(
-        await container.read(audioFilesServiceProvider.future),
-        hasLength(2),
-      );
-      final settings = container.read(hideLocalMusicProvider.notifier);
-      await settings.setHidden(true);
-      expect(await container.read(audioFilesServiceProvider.future), [remote]);
-      expect(await container.read(localLibraryProvider.future), hasLength(1));
-      container.invalidate(hideLocalMusicProvider);
-      expect(container.read(hideLocalMusicProvider), isTrue);
-      expect(await container.read(audioFilesServiceProvider.future), [remote]);
-      await container
-          .read(subsonicControllerProvider.notifier)
-          .setEnabled(false);
-      await pumpEventQueue();
-      expect(
-        (await container.read(audioFilesServiceProvider.future)).single.songId,
-        'local',
-      );
-      expect(container.read(hideLocalMusicProvider), isTrue);
-      await container.read(hideLocalMusicProvider.notifier).setHidden(false);
-      expect(
-        (await container.read(audioFilesServiceProvider.future)).single.songId,
-        'local',
-      );
-    },
-  );
-
-  test(
     'duplicate toggle persists, applies exclusions first and restores copies',
     () async {
       final box = await Hive.openBox<ExcludeDirectoryModel>(
@@ -178,8 +112,7 @@ void main() {
       ];
       final isolated = ProviderContainer(
         overrides: [
-          localLibraryProvider.overrideWith((_) async => songs),
-          subsonicControllerProvider.overrideWith(ProgressOnlyController.new),
+          audioFilesServiceProvider.overrideWith(() => _FixedAudioFiles(songs)),
         ],
       );
       addTearDown(isolated.dispose);
@@ -211,53 +144,8 @@ void main() {
         await isolated.read(filteredAudioFilesProvider.future),
         songs.skip(1).toList(),
       );
-      expect(await isolated.read(localLibraryProvider.future), songs);
     },
   );
-
-  test('scan progress does not rebuild the merged catalog', () async {
-    final isolated = ProviderContainer(
-      overrides: [
-        localLibraryProvider.overrideWith((_) async => []),
-        subsonicControllerProvider.overrideWith(ProgressOnlyController.new),
-      ],
-    );
-    addTearDown(isolated.dispose);
-    await isolated.read(sharedPreferencesWithCacheProvider.future);
-    await isolated.read(audioFilesServiceProvider.future);
-    var updates = 0;
-    final subscription = isolated.listen(audioFilesServiceProvider, (_, _) {
-      updates++;
-    });
-    addTearDown(subscription.close);
-    (isolated.read(
-      subsonicControllerProvider.notifier,
-    ) as ProgressOnlyController).reportProgress();
-    await Future<void>.delayed(Duration.zero);
-    expect(updates, 0);
-  });
-
-  test('filtered library completes again after a server refresh', () async {
-    await Hive.openBox<ExcludeDirectoryModel>(
-      Constants.excludedDirectoriesBoxName,
-    );
-    final subscription = container.listen(
-      filteredAudioFilesProvider,
-      (_, _) {},
-    );
-    addTearDown(subscription.close);
-    await container.read(filteredAudioFilesProvider.future);
-    final controller = container.read(subsonicControllerProvider.notifier);
-    await controller.connect('https://example.test', 'user', 'password');
-    await container
-        .read(filteredAudioFilesProvider.future)
-        .timeout(const Duration(seconds: 2));
-    await controller.refresh();
-    final songs = await container
-        .read(filteredAudioFilesProvider.future)
-        .timeout(const Duration(seconds: 2));
-    expect(songs.map((song) => song.songId), contains('local'));
-  });
 
   test('failed edits preserve credentials and the active server', () async {
     final controller = container.read(subsonicControllerProvider.notifier);
@@ -351,40 +239,6 @@ void main() {
       expect(state.signedIn, isFalse);
       expect(state.enabled, isTrue);
       expect(state.songs.single.remoteSongId, 'song');
-      expect(requests, 0);
-    },
-  );
-  test(
-    'merges sources and local failure does not block cached server music',
-    () async {
-      const config = SubsonicConfig('https://one.test', 'user', enabled: true);
-      final repository = await container.read(
-        subsonicRepositoryProvider.future,
-      );
-      final song = SubsonicRepository.parseSong(
-        {'id': 'song'},
-        {'id': 'album'},
-        config.id,
-      );
-      await repository.box.put('catalog:${config.id}', [song]);
-      final prefs = await container.read(
-        sharedPreferencesWithCacheProvider.future,
-      );
-      await prefs.setString(
-        'subsonicConfig',
-        jsonEncode({
-          'url': config.url,
-          'username': config.username,
-          'enabled': true,
-        }),
-      );
-      container.invalidate(subsonicControllerProvider);
-      final merged = await container.read(audioFilesServiceProvider.future);
-      expect(merged.map((song) => song.identity), ['local', song.identity]);
-      failLocal = true;
-      container.invalidate(localLibraryProvider);
-      final remoteOnly = await container.read(audioFilesServiceProvider.future);
-      expect(remoteOnly.single.identity, song.identity);
       expect(requests, 0);
     },
   );

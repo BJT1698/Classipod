@@ -31,7 +31,7 @@ class _VolumeBarState extends ConsumerState<VolumeBar> {
           .volumeMode;
       if (volumeMode == VolumeMode.app) {
         _volumeSubscription = ref
-            .read(audioPlayerProvider)
+            .read(libraryAudioHandlerProvider)
             .volumeStream
             .listen(_updateVolume);
       } else {

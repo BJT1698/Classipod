@@ -2,32 +2,20 @@ import 'dart:io';
 
 import 'package:classipod/core/constants/constants.dart';
 import 'package:classipod/core/models/music_metadata.dart';
-import 'package:classipod/core/navigation/routes.dart';
-import 'package:classipod/core/providers/filtered_audio_files_provider.dart';
-import 'package:classipod/core/providers/shared_preferences_with_cache_provider.dart';
 import 'package:classipod/core/repositories/library/library_metadata.dart';
 import 'package:classipod/core/repositories/library/library_progress.dart';
-import 'package:classipod/core/repositories/library/library_provider.dart';
 import 'package:classipod/core/repositories/library/library_repository.dart';
 import 'package:classipod/core/repositories/library/library_source.dart';
 import 'package:classipod/core/repositories/library/missing_tracks_provider.dart';
-import 'package:classipod/core/services/audio_files_service.dart';
-import 'package:classipod/core/services/audio_player_service.dart';
 import 'package:classipod/core/utils/artist_name_utils.dart';
-import 'package:classipod/features/app_startup/controllers/splash_controller.dart';
 import 'package:classipod/features/music/album/providers/album_details_provider.dart';
 import 'package:classipod/features/music/playlist/models/playlist_model.dart';
-import 'package:classipod/features/now_playing/models/now_playing_model.dart';
 import 'package:classipod/features/settings/controller/exclude_directories_controller.dart';
-import 'package:classipod/features/settings/controller/settings_preferences_controller.dart';
 import 'package:classipod/features/settings/models/exclude_directory_model.dart';
 import 'package:classipod/hive/hive_registrar.g.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:just_audio/just_audio.dart';
-import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
-import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
 LibrarySong record(int id, {String volume = 'primary', int modified = 1}) =>
     LibrarySong(
@@ -43,27 +31,6 @@ LibrarySnapshot snapshot(
   List<LibrarySong> songs, {
   List<String> volumes = const ['primary'],
 }) => LibrarySnapshot(songs: songs, volumes: volumes);
-
-class RecordingPlayback extends AudioPlayerServiceNotifier {
-  final queues = <List<MusicMetadata>>[];
-
-  @override
-  Future<void> restoreSession(List<MusicMetadata> library) async {
-    queues.add(library);
-  }
-
-  @override
-  Future<void> setAudioSource({
-    NowPlayingType nowPlayingType = NowPlayingType.songs,
-    bool preload = true,
-    required List<MusicMetadata> musicMetadataList,
-  }) async {
-    queues.add(musicMetadataList);
-  }
-
-  @override
-  Future<void> setLoopMode(LoopMode loopMode) async {}
-}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -148,11 +115,8 @@ void main() {
   test('missing tracks persist and clear after successful reindex', () async {
     fail = true;
     await repository.load(progress.add);
-    final container = ProviderContainer(
-      overrides: [localLibraryProvider.overrideWith((_) async => [])],
-    );
+    final container = ProviderContainer();
     addTearDown(container.dispose);
-    await container.read(localLibraryProvider.future);
     final missing = container.read(missingTracksProvider);
     expect(missing, hasLength(2));
     expect(missing.first.location, '/primary/1.mp3');
@@ -161,8 +125,7 @@ void main() {
     fail = false;
     repository.requestRescan();
     await repository.load(progress.add);
-    container.invalidate(localLibraryProvider);
-    await container.read(localLibraryProvider.future);
+    container.invalidate(missingTracksProvider);
     expect(container.read(missingTracksProvider), isEmpty);
   });
 
@@ -181,11 +144,8 @@ void main() {
       final otherKey = await box.add(
         ExcludeDirectoryModel(directoryPath: '/other', isExcluded: false),
       );
-      final container = ProviderContainer(
-        overrides: [localLibraryProvider.overrideWith((_) async => [])],
-      );
+      final container = ProviderContainer();
       addTearDown(container.dispose);
-      await container.read(localLibraryProvider.future);
       final subscription = container.listen(missingTracksProvider, (_, _) {});
       addTearDown(subscription.close);
       expect(container.read(missingTracksProvider), hasLength(2));
@@ -491,103 +451,6 @@ void main() {
       reads.clear();
       await repository.load(progress.add);
       expect(reads, hasLength(2));
-    },
-  );
-
-  test(
-    'first-run discovery, rescans and exclusions complete with real filtering',
-    () async {
-      final previousPreferences = SharedPreferencesAsyncPlatform.instance;
-      SharedPreferencesAsyncPlatform.instance =
-          InMemorySharedPreferencesAsync.empty();
-      addTearDown(
-        () => SharedPreferencesAsyncPlatform.instance = previousPreferences,
-      );
-      final playback = RecordingPlayback();
-      final container = ProviderContainer(
-        overrides: [
-          libraryRepositoryProvider.overrideWithValue(repository),
-          audioPlayerServiceProvider.overrideWith(() => playback),
-        ],
-      );
-      addTearDown(container.dispose);
-      await container.read(sharedPreferencesWithCacheProvider.future);
-      await container.read(audioPlayerServiceProvider.future);
-      final updates = <LibraryProgress>[];
-      container.listen(
-        libraryProgressProvider,
-        (_, value) => updates.add(value),
-      );
-      await container
-          .read(splashControllerProvider.future)
-          .timeout(const Duration(seconds: 3));
-      final router = container.read(routerProvider);
-      addTearDown(router.dispose);
-      expect(playback.queues, hasLength(1));
-      expect(playback.queues.single, hasLength(2));
-      expect(router.routeInformationProvider.value.uri.path, '/menu');
-      final playlists = Hive.box<PlaylistModel>(Constants.playlistBoxName);
-      await playlists.add(
-        PlaylistModel(name: 'Favorites', songs: playback.queues.single),
-      );
-      reads.clear();
-      updates.clear();
-      await container
-          .read(settingsPreferencesControllerProvider.notifier)
-          .rescanMusicFiles();
-      await container
-          .read(splashControllerProvider.future)
-          .timeout(const Duration(seconds: 3));
-      expect(reads, hasLength(2)); // Unchanged files must still be extracted.
-      expect(playback.queues, hasLength(2));
-      expect(playlists.values.single.name, 'Favorites');
-      expect(updates.first.phase, LibraryPhase.discovering);
-      expect(updates.first.songsLoaded, 0);
-      expect(updates.first.artworkCached, 0);
-      expect(updates.last.phase, LibraryPhase.complete);
-      expect(updates.last.songsCached, 0);
-      expect(updates.last.showCounts, isTrue);
-      expect(router.routeInformationProvider.value.uri.path, '/menu');
-      discovered = snapshot([record(2, modified: 2), record(3)]);
-      reads.clear();
-      await container
-          .read(settingsPreferencesControllerProvider.notifier)
-          .refreshLibrary();
-      await container
-          .read(splashControllerProvider.future)
-          .timeout(const Duration(seconds: 3));
-      expect(reads, ['art:${record(3).path}']);
-      expect(playback.queues, hasLength(3));
-      expect(playback.queues.last.map((song) => song.identity), [
-        record(2).uri,
-        record(3).uri,
-      ]);
-      expect(playlists.values.single.name, 'Favorites');
-      await container
-          .read(settingsPreferencesControllerProvider.notifier)
-          .rescanMusicFiles(clearPlaylists: true);
-      await container
-          .read(splashControllerProvider.future)
-          .timeout(const Duration(seconds: 3));
-      expect(playlists.isEmpty, isTrue);
-      expect(playback.queues, hasLength(4));
-
-      final directories = Hive.box<ExcludeDirectoryModel>(
-        Constants.excludedDirectoriesBoxName,
-      );
-      expect(directories.values.single.directoryPath, '/primary');
-      final exclusions = container.read(excludedDirectoriesProvider.notifier);
-      await exclusions.toggleExcludeDirectory(
-        excludeDirectoryModelKey: directories.keys.single,
-      );
-      expect(await container.read(filteredAudioFilesProvider.future), isEmpty);
-      await exclusions.toggleExcludeDirectory(
-        excludeDirectoryModelKey: directories.keys.single,
-      );
-      expect(
-        await container.read(filteredAudioFilesProvider.future),
-        hasLength(2),
-      );
     },
   );
 

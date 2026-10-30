@@ -1,10 +1,9 @@
 import 'dart:async';
 
 import 'package:classipod/core/services/audio_player_service.dart';
-import 'package:classipod/core/services/playback/library_audio_handler.dart';
+import 'package:classipod/core/services/playback/spotify_audio_handler.dart';
 import 'package:classipod/features/sleep_timer/models/sleep_timer_model.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:just_audio/just_audio.dart';
 
 typedef SleepTimerClock = DateTime Function();
 typedef SleepTimerScheduler = Timer Function(
@@ -34,7 +33,6 @@ final sleepTimerSchedulerProvider = Provider<SleepTimerScheduler>(
 
 final sleepTimerPlaybackProvider = Provider<SleepTimerPlayback>((ref) {
   return _AudioPlayerSleepTimerPlayback(
-    player: ref.read(audioPlayerProvider),
     handler: ref.read(libraryAudioHandlerProvider),
     stopPlayback: ref.read(audioPlayerServiceProvider.notifier).stop,
   );
@@ -225,12 +223,10 @@ class SleepTimerController extends Notifier<SleepTimerState> {
 }
 
 class _AudioPlayerSleepTimerPlayback implements SleepTimerPlayback {
-  final AudioPlayer player;
-  final LibraryAudioHandler handler;
+  final SpotifyAudioHandler handler;
   final Future<void> Function() stopPlayback;
 
   const _AudioPlayerSleepTimerPlayback({
-    required this.player,
     required this.handler,
     required this.stopPlayback,
   });
@@ -239,31 +235,31 @@ class _AudioPlayerSleepTimerPlayback implements SleepTimerPlayback {
   int? get currentIndex => handler.currentIndex;
 
   @override
-  Duration? get duration => player.duration;
+  Duration? get duration => handler.duration;
 
   @override
-  bool get playing => player.playing;
+  bool get playing => handler.playing;
 
   @override
-  Duration get position => player.position;
+  Duration get position => handler.displayPosition;
 
   @override
-  double get speed => player.speed;
+  double get speed => 1;
 
   @override
   Stream<int?> get currentIndexStream => handler.indexStream;
 
   @override
-  Stream<Duration?> get durationStream => player.durationStream;
+  Stream<Duration?> get durationStream => handler.durationStream;
 
   @override
-  Stream<bool> get playingStream => player.playingStream;
+  Stream<bool> get playingStream => handler.playingStream;
 
   @override
-  Stream<Duration> get positionStream => player.positionStream;
+  Stream<Duration> get positionStream => handler.positionStream;
 
   @override
-  Stream<double> get speedStream => player.speedStream;
+  Stream<double> get speedStream => const Stream.empty();
 
   @override
   Future<void> stop() => stopPlayback();

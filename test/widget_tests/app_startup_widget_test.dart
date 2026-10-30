@@ -6,6 +6,9 @@ import 'package:classipod/classipod_app.dart';
 import 'package:classipod/core/models/device_directory.dart';
 import 'package:classipod/core/providers/device_directory_provider.dart';
 import 'package:classipod/core/providers/shared_preferences_with_cache_provider.dart';
+import 'package:classipod/core/services/audio_player_service.dart';
+import 'package:classipod/core/services/playback/spotify_audio_handler.dart';
+import 'package:classipod/core/spotify/spotify_client.dart';
 import 'package:classipod/features/app_startup/controllers/app_startup_controller.dart';
 import 'package:classipod/features/app_startup/screens/app_startup_screen.dart';
 import 'package:classipod/features/app_startup/screens/splash_screen.dart';
@@ -17,12 +20,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
+// Never polled: the real handler would start timers and hit the network.
+class _SpotifyClient extends Fake implements SpotifyClient {}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late ProviderContainer providerContainer;
   setUp(() {
     providerContainer = ProviderContainer(
       overrides: [
+        libraryAudioHandlerProvider.overrideWithValue(
+          SpotifyAudioHandler(_SpotifyClient()),
+        ),
         deviceDirectoryProvider.overrideWith(
           (_) => DeviceDirectory(
             documentsDirectory: Directory(

@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:classipod/core/navigation/routes.dart';
 import 'package:classipod/core/providers/filtered_audio_files_provider.dart';
 import 'package:classipod/core/services/audio_player_service.dart';
+import 'package:classipod/core/spotify/spotify_controller.dart';
 import 'package:classipod/features/music/album/providers/album_details_provider.dart';
 import 'package:classipod/features/music/artists/providers/artist_names_provider.dart';
 import 'package:classipod/features/music/genres/providers/genres_provider.dart';
@@ -12,8 +11,6 @@ import 'package:classipod/features/settings/controller/settings_preferences_cont
 import 'package:classipod/features/tutorial/controller/tutorial_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:on_audio_query/on_audio_query.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 final splashControllerProvider =
     AsyncNotifierProvider<SplashControllerNotifier, void>(
@@ -33,10 +30,13 @@ class SplashControllerNotifier extends AsyncNotifier<void> {
   }
 
   Future<void> _requestStoragePermissions() async {
-    if (!kIsWeb && Platform.isAndroid) {
-      final version = (await OnAudioQuery().queryDeviceInfo()).version;
-      final permission = version >= 33 ? Permission.audio : Permission.storage;
-      await permission.request();
+    final spotify = await ref.read(spotifyControllerProvider.future);
+    if (!spotify.signedIn) {
+      try {
+        await ref.read(spotifyControllerProvider.notifier).signIn();
+      } catch (error) {
+        debugPrint('Spotify sign-in skipped: $error');
+      }
     }
 
     await initializeApp();

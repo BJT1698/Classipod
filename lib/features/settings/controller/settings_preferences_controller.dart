@@ -3,11 +3,9 @@ import 'dart:io' as io;
 
 import 'package:classipod/core/constants/constants.dart';
 import 'package:classipod/core/navigation/routes.dart';
-import 'package:classipod/core/repositories/library/library_progress.dart';
-import 'package:classipod/core/repositories/library/library_provider.dart';
 import 'package:classipod/core/services/audio_files_service.dart';
 import 'package:classipod/core/services/audio_player_service.dart';
-import 'package:classipod/core/subsonic/subsonic_controller.dart';
+import 'package:classipod/core/spotify/spotify_controller.dart';
 import 'package:classipod/features/app_startup/controllers/splash_controller.dart';
 import 'package:classipod/features/music/playlist/models/playlist_model.dart';
 import 'package:classipod/features/settings/models/app_theme.dart';
@@ -323,29 +321,14 @@ class SettingsPreferencesControllerNotifier
   }
 
   Future<void> rescanMusicFiles({bool clearPlaylists = false}) async {
-    if (!state.fetchOnlineMusic) {
-      ref.read(libraryRepositoryProvider).requestRescan();
-    }
     if (clearPlaylists) {
       await Hive.box<PlaylistModel>(Constants.playlistBoxName).clear();
     }
-    unawaited(
-      ref.read(subsonicControllerProvider.notifier).refresh(clearArtwork: true),
-    );
-    _reloadLibrary();
+    await refreshLibrary();
   }
 
   Future<void> refreshLibrary() async {
-    if (!state.fetchOnlineMusic) {
-      ref.read(libraryRepositoryProvider).requestRefresh();
-    }
-    unawaited(ref.read(subsonicControllerProvider.notifier).refresh());
-    _reloadLibrary();
-  }
-
-  void _reloadLibrary() {
-    ref.read(libraryProgressProvider.notifier).report(const LibraryProgress());
-    ref.invalidate(localLibraryProvider);
+    unawaited(ref.read(spotifyControllerProvider.notifier).refresh());
     ref.invalidate(audioFilesServiceProvider);
     ref.invalidate(splashControllerProvider);
     ref.read(routerProvider).goNamed(Routes.splash.name);
@@ -387,9 +370,9 @@ class SettingsPreferencesControllerNotifier
 
   Future<void> increaseVolume() async {
     if (state.volumeMode == VolumeMode.app) {
-      final double currentVolume = ref.read(audioPlayerProvider).volume;
-      if (currentVolume < 1) {
-        await ref.read(audioPlayerProvider).setVolume(currentVolume + 0.05);
+      final handler = ref.read(libraryAudioHandlerProvider);
+      if (handler.volume < 1) {
+        await handler.setVolume(handler.volume + 0.05);
       }
     } else {
       final double currentVolume = await VolumeController.instance.getVolume();
@@ -403,13 +386,9 @@ class SettingsPreferencesControllerNotifier
 
   Future<void> decreaseVolume() async {
     if (state.volumeMode == VolumeMode.app) {
-      final double currentVolume = ref.read(audioPlayerProvider).volume;
-      if (currentVolume > 0) {
-        if (currentVolume <= 0.05) {
-          await ref.read(audioPlayerProvider).setVolume(0);
-        } else {
-          await ref.read(audioPlayerProvider).setVolume(currentVolume - 0.05);
-        }
+      final handler = ref.read(libraryAudioHandlerProvider);
+      if (handler.volume > 0) {
+        await handler.setVolume(handler.volume - 0.05);
       }
     } else {
       final double currentVolume = await VolumeController.instance.getVolume();

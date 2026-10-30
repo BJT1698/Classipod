@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:classipod/core/constants/keys.dart';
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/models/playback_shuffle_mode.dart';
 import 'package:classipod/core/services/audio_player_service.dart';
-import 'package:classipod/core/services/playback/library_audio_handler.dart';
+import 'package:classipod/core/services/playback/spotify_audio_handler.dart';
+import 'package:classipod/core/spotify/spotify_client.dart';
 import 'package:classipod/features/device/models/device_action.dart';
 import 'package:classipod/features/device/services/device_buttons_service_provider.dart';
 import 'package:classipod/features/device/widgets/device_controls.dart';
@@ -30,27 +30,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 
-class _Handler extends BaseAudioHandler implements LibraryAudioHandler {
-  @override
-  Duration get displayPosition => const Duration(seconds: 20);
+class _FakeSpotifyClient extends Fake implements SpotifyClient {
+  final List<int> volumes = [];
 
   @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class _Player extends Fake implements AudioPlayer {
-  double level = 0.5;
+  Future<List<SpotifyDevice>> devices() async => [
+    const SpotifyDevice(id: 'phone', name: 'Phone', type: 'Smartphone'),
+  ];
 
   @override
-  double get volume => level;
-
-  @override
-  Future<void> setVolume(double value) async {
-    level = value;
+  Future<void> setVolume(int percent, {String? deviceId}) async {
+    volumes.add(percent);
   }
-
-  @override
-  Stream<double> get volumeStream => Stream.value(0.5);
 }
 
 class _Details extends NowPlayingDetailsNotifier {
@@ -174,15 +165,15 @@ class _Settings extends SettingsPreferencesControllerNotifier {
   @override
   Future<void> increaseVolume() async {
     increases++;
-    final player = ref.read(audioPlayerProvider);
-    await player.setVolume((player.volume + 0.05).clamp(0, 1));
+    final handler = ref.read(libraryAudioHandlerProvider);
+    await handler.setVolume(handler.volume + 0.05);
   }
 
   @override
   Future<void> decreaseVolume() async {
     decreases++;
-    final player = ref.read(audioPlayerProvider);
-    await player.setVolume((player.volume - 0.05).clamp(0, 1));
+    final handler = ref.read(libraryAudioHandlerProvider);
+    await handler.setVolume(handler.volume - 0.05);
   }
 }
 
@@ -210,13 +201,16 @@ void main() {
 
   Future<void> mount(WidgetTester tester, {bool hasLyrics = true}) async {
     audio = _AudioService();
+    final handler = SpotifyAudioHandler(_FakeSpotifyClient());
+    addTearDown(handler.dispose);
+    await handler.setVolume(0.5);
+    await handler.seek(const Duration(seconds: 20));
     container = ProviderContainer(
       overrides: [
         nowPlayingDetailsProvider.overrideWith(() => _Details(hasLyrics)),
         tutorialControllerProvider.overrideWith(_Tutorial.new),
         audioPlayerServiceProvider.overrideWith(() => audio),
-        libraryAudioHandlerProvider.overrideWithValue(_Handler()),
-        audioPlayerProvider.overrideWithValue(_Player()),
+        libraryAudioHandlerProvider.overrideWithValue(handler),
         settingsPreferencesControllerProvider.overrideWith(_Settings.new),
         deviceButtonsServiceProvider.overrideWith(_Buttons.new),
       ],
@@ -299,7 +293,7 @@ void main() {
         await input(tester, DeviceAction.select);
         expect(controller(tester).page, 0);
         expect(
-          container.read(audioPlayerProvider).volume,
+          container.read(libraryAudioHandlerProvider).volume,
           closeTo(forward ? 0.55 : 0.45, 0.0001),
         );
         // Reopening must capture a fresh baseline.
@@ -343,7 +337,7 @@ void main() {
     tester,
   ) async {
     await mount(tester);
-    await container.read(audioPlayerProvider).setVolume(1);
+    await container.read(libraryAudioHandlerProvider).setVolume(1);
     await input(tester, DeviceAction.rotateForward);
     await input(tester, DeviceAction.select);
     expect(controller(tester).page, 1);

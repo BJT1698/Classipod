@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/models/playback_shuffle_mode.dart';
-import 'package:classipod/core/services/playback/library_audio_handler.dart';
+import 'package:classipod/core/services/playback/spotify_audio_handler.dart';
 import 'package:classipod/features/now_playing/models/now_playing_model.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
@@ -163,7 +163,7 @@ class PlaybackSessionStore {
     return _pending;
   }
 
-  void attach(LibraryAudioHandler handler, NowPlayingType Function() type) {
+  void attach(SpotifyAudioHandler handler, NowPlayingType Function() type) {
     List<MusicMetadata>? previousSongs;
     List<String> ids = const [];
     void checkpoint() {

@@ -180,7 +180,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   Future<double> _readVolume() async {
     if (ref.read(settingsPreferencesControllerProvider).volumeMode ==
         VolumeMode.app) {
-      return ref.read(audioPlayerProvider).volume;
+      return ref.read(libraryAudioHandlerProvider).volume;
     }
     return VolumeController.instance.getVolume();
   }

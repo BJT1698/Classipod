@@ -1,6 +1,5 @@
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/repositories/library/library_repository.dart';
-import 'package:classipod/core/services/audio_files_service.dart';
 import 'package:classipod/features/settings/controller/exclude_directories_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive.dart';
@@ -15,7 +14,6 @@ class MissingTrack {
 }
 
 final missingTracksProvider = Provider<List<MissingTrack>>((ref) {
-  ref.watch(localLibraryProvider);
   final excludedPaths = ref
       .watch(excludedDirectoriesProvider)
       .where((directory) => directory.isExcluded)

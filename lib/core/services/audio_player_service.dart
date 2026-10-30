@@ -1,71 +1,69 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:classipod/core/alerts/dialogs.dart';
 import 'package:classipod/core/constants/keys.dart';
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/models/playback_shuffle_mode.dart';
 import 'package:classipod/core/providers/filtered_audio_files_provider.dart';
-import 'package:classipod/core/services/playback/library_audio_handler.dart';
 import 'package:classipod/core/services/playback/playback_session.dart';
-import 'package:classipod/core/subsonic/subsonic_controller.dart';
+import 'package:classipod/core/services/playback/spotify_audio_handler.dart';
+import 'package:classipod/core/spotify/spotify_controller.dart';
 import 'package:classipod/features/music/album/models/album_model.dart';
 import 'package:classipod/features/music/playlist/models/playlist_model.dart';
 import 'package:classipod/features/now_playing/models/now_playing_model.dart';
 import 'package:classipod/features/now_playing/provider/now_playing_details_provider.dart';
 import 'package:classipod/features/settings/controller/settings_preferences_controller.dart';
-import 'package:classipod/features/settings/widgets/subsonic_dialog.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:just_audio/just_audio.dart' show LoopMode;
+import 'package:url_launcher/url_launcher.dart';
 
-final audioPlayerProvider = Provider<AudioPlayer>((_) {
-  return AudioPlayer();
-});
-
-final libraryAudioHandlerProvider = Provider<LibraryAudioHandler>((ref) {
-  final handler = LibraryAudioHandler(
-    ref.read(audioPlayerProvider),
-    resolveSource: (song) async {
-      if (!song.isSubsonic) return song.toAudioSource() as UriAudioSource;
-      final remote = ref.read(subsonicControllerProvider).value;
-      final context = rootNavigatorKey.currentContext;
-      if (remote?.enabled == true &&
-          remote?.signedIn != true &&
-          context != null) {
-        await showSubsonicDialog(context);
-      }
-      return ref.read(subsonicControllerProvider.notifier).resolve(song);
+final libraryAudioHandlerProvider = Provider<SpotifyAudioHandler>((ref) {
+  final handler = SpotifyAudioHandler(
+    ref.read(spotifyClientProvider),
+    openSpotify: () async {
+      await launchUrl(
+        Uri.parse('spotify:'),
+        mode: LaunchMode.externalNonBrowserApplication,
+      );
     },
   );
-  ref.listen(
-    subsonicControllerProvider.select(
-      (value) => (value.value?.enabled, value.value?.config?.id),
-    ),
-    (_, _) => _reconcileLibrary(ref, handler),
+  handler.onError = (error) {
+    final context = rootNavigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    unawaited(
+      Dialogs.showInfoDialog(
+        context: context,
+        title: 'Spotify',
+        content: spotifyErrorMessage(error.reason),
+      ),
+    );
+  };
+  final lifecycle = AppLifecycleListener(
+    onResume: handler.resume,
+    onHide: handler.suspend,
   );
-  ref.onDispose(() => unawaited(handler.dispose()));
+  handler.resume();
+  ref.onDispose(() {
+    lifecycle.dispose();
+    unawaited(handler.dispose());
+  });
   return handler;
 });
 
-void _reconcileLibrary(Ref ref, LibraryAudioHandler handler) {
+void _reconcileLibrary(Ref ref, SpotifyAudioHandler handler) {
   if (handler.restoringSession) return;
   final now = ref.read(nowPlayingDetailsProvider);
-  final remote = ref.read(subsonicControllerProvider).value;
   final library = ref.read(filteredAudioFilesProvider).value;
   final songs = now.nowPlayingType == NowPlayingType.songs && library != null
       ? library.toList()
       : now.metadataList;
-  final retained = songs
-      .where(
-        (song) =>
-            !song.isSubsonic ||
-            (remote?.enabled == true && remote?.config?.id == song.serverId),
-      )
-      .toList();
-  if (listEquals(now.metadataList, retained)) return;
-  ref.read(nowPlayingDetailsProvider.notifier).reconcileMetadata(retained);
-  unawaited(handler.reconcileSongs(retained));
+  if (listEquals(now.metadataList, songs)) return;
+  ref.read(nowPlayingDetailsProvider.notifier).reconcileMetadata(songs);
+  unawaited(handler.reconcileSongs(songs));
 }
 
 final audioPlayerServiceProvider =
@@ -158,7 +156,7 @@ class AudioPlayerServiceNotifier extends AsyncNotifier<void> {
   }
 
   Future<void> _resetRestoredSession(
-    LibraryAudioHandler handler,
+    SpotifyAudioHandler handler,
     PlaybackSessionStore? store,
     AudioServiceRepeatMode initialRepeatMode,
   ) async {
@@ -195,9 +193,7 @@ class AudioPlayerServiceNotifier extends AsyncNotifier<void> {
 
   Future<void> _play() async {
     final handler = ref.read(libraryAudioHandlerProvider);
-    if (ref.read(audioPlayerProvider).playing &&
-        handler.playbackState.value.errorCode == null &&
-        !handler.recovering) {
+    if (handler.playing && handler.playbackState.value.errorCode == null) {
       return;
     }
 
@@ -395,9 +391,7 @@ class AudioPlayerServiceNotifier extends AsyncNotifier<void> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final handler = ref.read(libraryAudioHandlerProvider);
-      if (handler.recovering
-          ? handler.wantsPlayback
-          : ref.read(audioPlayerProvider).playing) {
+      if (handler.playing) {
         await pause();
       } else {
         await _play();

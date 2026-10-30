@@ -4,10 +4,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:classipod/core/models/music_metadata.dart';
 import 'package:classipod/core/models/playback_shuffle_mode.dart';
 import 'package:classipod/core/providers/filtered_audio_files_provider.dart';
-import 'package:classipod/core/repositories/library/library_repository.dart';
 import 'package:classipod/core/services/audio_files_service.dart';
 import 'package:classipod/core/services/audio_player_service.dart';
-import 'package:classipod/core/subsonic/subsonic_controller.dart';
 import 'package:classipod/features/music/album/providers/album_details_provider.dart';
 import 'package:classipod/features/music/playlist/providers/playlists_provider.dart';
 import 'package:classipod/features/now_playing/models/now_playing_model.dart';
@@ -22,7 +20,6 @@ final nowPlayingDetailsProvider =
 class NowPlayingDetailsNotifier extends Notifier<NowPlayingModel> {
   @override
   NowPlayingModel build() {
-    final player = ref.read(audioPlayerProvider);
     final handler = ref.read(libraryAudioHandlerProvider);
     final subscriptions = <StreamSubscription<dynamic>>[];
     subscriptions.add(
@@ -40,7 +37,7 @@ class NowPlayingDetailsNotifier extends Notifier<NowPlayingModel> {
     );
 
     subscriptions.add(
-      player.playingStream.listen((isPlaying) {
+      handler.playingStream.listen((isPlaying) {
         if (isPlaying != state.isPlaying) {
           state = state.copyWith(isPlaying: isPlaying);
         }
@@ -169,16 +166,9 @@ class NowPlayingDetailsNotifier extends Notifier<NowPlayingModel> {
       ],
     );
 
-    if (updatedMetadata.isSubsonic) {
-      await ref
-          .read(subsonicControllerProvider.notifier)
-          .updateSong(updatedMetadata);
-    } else if (updatedMetadata.songId != null) {
-      await LibraryRepository.updateRating(updatedMetadata);
-      ref
-          .read(audioFilesServiceProvider.notifier)
-          .replaceMetadata(updatedMetadata);
-    }
+    ref.read(audioFilesServiceProvider.notifier).replaceMetadata(
+      updatedMetadata,
+    );
     ref.invalidate(filteredAudioFilesProvider);
     ref.invalidate(albumDetailsProvider);
     ref.invalidate(playlistsProvider);
